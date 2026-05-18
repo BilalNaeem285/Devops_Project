@@ -23,7 +23,7 @@ jobs:
       id: cloudformation
       uses: aws-actions/aws-cloudformation-github-deploy@v1
       with:
-        name: ai-compiler-fixer-docker-stack-v2
+        name: ai-compiler-fixer-docker-stack-v3
         template: aws/template.yml
         no-fail-on-empty-changeset: "1"
         parameter-overrides: "KeyPairName=${{ secrets.AWS_KEY_PAIR_NAME }}"
