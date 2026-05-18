@@ -70,7 +70,7 @@ Resources:
   CompilerFixerInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: t3.large
+      InstanceType: t3.micro
       # This magical line automatically fetches the latest official Ubuntu 22.04 LTS image for whatever region you are running in!
       ImageId: '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id}}'
       KeyName: !Ref KeyPairName
