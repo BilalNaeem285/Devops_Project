@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Deploy AI Compiler Fixer with Docker on an EC2 instance'
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+
+Resources:
+  CompilerFixerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and Streamlit traffic
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 # Allows deployment access via SSH
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          CidrIp: 0.0.0.0/0 # Allows you to open Streamlit in your web browser
+
+  CompilerFixerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.large # Gives enough processing memory for our 1.5B model
+      ImageId: ami-04b70fa74e45c3917 # Official Ubuntu Linux system image
+      KeyName: !Ref KeyPairName
+      SecurityGroups:
+        - !Ref CompilerFixerSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30 # Gives 30GB disk space to store the AI model weights cleanly
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: AI-Compiler-Fixer-Server
