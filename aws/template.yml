@@ -7,7 +7,6 @@ Parameters:
     Description: Name of an existing EC2 KeyPair to enable SSH access
 
 Resources:
-  # This creates a safe default network setup if your account doesn't choose one automatically
   CompilerFixerVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -23,7 +22,7 @@ Resources:
     Properties:
       VpcId: !Ref CompilerFixerVPC
       CidrBlock: 10.0.1.0/24
-      MapPublicIpOnLaunch: true # Crucial so our server gets a public IP address!
+      MapPublicIpOnLaunch: true
 
   CompilerFixerInternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -72,7 +71,8 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.large
-      ImageId: ami-04b70fa74e45c3917 # Ubuntu 24.04 LTS Image
+      # This magical line automatically fetches the latest official Ubuntu 22.04 LTS image for whatever region you are running in!
+      ImageId: '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id}}'
       KeyName: !Ref KeyPairName
       SubnetId: !Ref CompilerFixerSubnet
       SecurityGroupIds:
