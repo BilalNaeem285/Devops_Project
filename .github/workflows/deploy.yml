@@ -79,7 +79,6 @@
 
 
 
-
 name: CI/CD Docker Deploy to AWS EC2
 
 on:
@@ -138,11 +137,20 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         script: |
-          if ! command -v docker &> /dev/null
-          then
+          # Install Docker and Docker Compose if missing
+          if ! command -v docker &> /dev/null; then
             sudo apt-get update -y
             sudo apt-get install -y docker.io docker-compose-v2
             sudo usermod -aG docker ubuntu
+          fi
+
+          # Install AWS CLI dependencies if missing
+          if ! command -v aws &> /dev/null; then
+            sudo apt-get install -y unzip curl
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+            rm -rf aws awscliv2.zip
           fi
 
           sudo mkdir -p /var/www/ai_compiler_fixer
@@ -154,7 +162,7 @@ jobs:
         host: ${{ env.EC2_PUBLIC_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        source: "docker-compose.yml" # We only transfer the compose manager file, no loose application files!
+        source: "docker-compose.yml"
         target: "/var/www/ai_compiler_fixer"
 
     - name: Pull From ECR & Launch Container Services
@@ -163,17 +171,24 @@ jobs:
         host: ${{ env.EC2_PUBLIC_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        # Pass variables from the secure GitHub Actions environment directly down to the runner script
+        envs: AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
         script: |
           cd /var/www/ai_compiler_fixer
           
-          # Authenticate instance Docker engine directly into ECR
-          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+          # Explicitly export keys so the instance can securely speak to ECR
+          export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_DEFAULT_REGION="us-east-1"
+          export AWS_ACCOUNT_ID="${{ secrets.AWS_ACCOUNT_ID }}"
+
+          # Authenticate Docker daemon cleanly using the newly installed CLI
+          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
-          # Pass the dynamic AWS Account context into the compose layer environment runtime
-          export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-          
+          # Pull and spin up services
           sudo -E docker compose pull
           sudo -E docker compose up -d
 
-          # Check and ensure model layers are loaded into execution space
+          # Allow a small 5-second window for Ollama socket synchronization before triggering weights download
+          sleep 5
           sudo docker compose exec -d ollama ollama run qwen2.5-coder:1.5b
