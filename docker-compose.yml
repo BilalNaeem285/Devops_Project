@@ -1,20 +1,47 @@
+# version: '3.8'
+
+# services:
+#   # The AI Compiler App
+#   app:
+#     # Instead of building, we run python directly and mount your files to save RAM!
+#     image: python:3.11-slim
+#     ports:
+#       - "8501:8501"
+#     environment:
+#       - OLLAMA_HOST=http://ollama:11434
+#     volumes:
+#       - .:/app
+#     working_dir: /app
+#     command: >
+#       sh -c "pip install --no-cache-dir -r requirements.txt && 
+#              streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0"
+#     depends_on:
+#       - ollama
+
+#   # The Local LLM Backend Engine
+#   ollama:
+#     image: ollama/ollama:latest
+#     ports:
+#       - "11434:11434"
+#     volumes:
+#       - ollama_storage:/root/.ollama
+
+# volumes:
+#   ollama_storage:
+
+
+
 version: '3.8'
 
 services:
-  # The AI Compiler App
+  # The AI Compiler App (Now pulled pre-compiled from your private AWS Registry!)
   app:
-    # Instead of building, we run python directly and mount your files to save RAM!
-    image: python:3.11-slim
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/ai-compiler-app:latest
     ports:
       - "8501:8501"
     environment:
       - OLLAMA_HOST=http://ollama:11434
-    volumes:
-      - .:/app
-    working_dir: /app
-    command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt && 
-             streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0"
+    restart: always
     depends_on:
       - ollama
 
@@ -25,6 +52,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama_storage:/root/.ollama
+    restart: always
 
 volumes:
   ollama_storage:

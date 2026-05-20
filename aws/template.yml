@@ -1,5 +1,99 @@
+# AWSTemplateFormatVersion: '2010-09-09'
+# Description: 'Deploy AI Compiler Fixer with Docker on an EC2 instance'
+
+# Parameters:
+#   KeyPairName:
+#     Type: AWS::EC2::KeyPair::KeyName
+#     Description: Name of an existing EC2 KeyPair to enable SSH access
+
+# Resources:
+#   CompilerFixerVPC:
+#     Type: AWS::EC2::VPC
+#     Properties:
+#       CidrBlock: 10.0.0.0/16
+#       EnableDnsSupport: true
+#       EnableDnsHostnames: true
+#       Tags:
+#         - Key: Name
+#           Value: AI-Compiler-VPC
+
+#   CompilerFixerSubnet:
+#     Type: AWS::EC2::Subnet
+#     Properties:
+#       VpcId: !Ref CompilerFixerVPC
+#       CidrBlock: 10.0.1.0/24
+#       MapPublicIpOnLaunch: true
+
+#   CompilerFixerInternetGateway:
+#     Type: AWS::EC2::InternetGateway
+
+#   VPCGatewayAttachment:
+#     Type: AWS::EC2::VPCGatewayAttachment
+#     Properties:
+#       VpcId: !Ref CompilerFixerVPC
+#       InternetGatewayId: !Ref CompilerFixerInternetGateway
+
+#   CompilerFixerRouteTable:
+#     Type: AWS::EC2::RouteTable
+#     Properties:
+#       VpcId: !Ref CompilerFixerVPC
+
+#   CompilerFixerRoute:
+#     Type: AWS::EC2::Route
+#     DependsOn: VPCGatewayAttachment
+#     Properties:
+#       RouteTableId: !Ref CompilerFixerRouteTable
+#       DestinationCidrBlock: 0.0.0.0/0
+#       GatewayId: !Ref CompilerFixerInternetGateway
+
+#   SubnetRouteTableAssociation:
+#     Type: AWS::EC2::SubnetRouteTableAssociation
+#     Properties:
+#       SubnetId: !Ref CompilerFixerSubnet
+#       RouteTableId: !Ref CompilerFixerRouteTable
+
+#   CompilerFixerSecurityGroup:
+#     Type: AWS::EC2::SecurityGroup
+#     Properties:
+#       GroupDescription: Allow SSH and Streamlit traffic
+#       VpcId: !Ref CompilerFixerVPC
+#       SecurityGroupIngress:
+#         - IpProtocol: tcp
+#           FromPort: 22
+#           ToPort: 22
+#           CidrIp: 0.0.0.0/0
+#         - IpProtocol: tcp
+#           FromPort: 8501
+#           ToPort: 8501
+#           CidrIp: 0.0.0.0/0
+
+#   CompilerFixerInstance:
+#     Type: AWS::EC2::Instance
+#     Properties:
+#       InstanceType: t3.small
+#       # This magical line automatically fetches the latest official Ubuntu 22.04 LTS image for whatever region you are running in!
+#       ImageId: '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id}}'
+#       KeyName: !Ref KeyPairName
+#       SubnetId: !Ref CompilerFixerSubnet
+#       SecurityGroupIds:
+#         - !Ref CompilerFixerSecurityGroup
+#       BlockDeviceMappings:
+#         - DeviceName: /dev/sda1
+#           Ebs:
+#             VolumeSize: 30
+#             VolumeType: gp3
+#       Tags:
+#         - Key: Name
+#           Value: AI-Compiler-Fixer-Server
+
+
+
+
+
+
+
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Deploy AI Compiler Fixer with Docker on an EC2 instance'
+Description: 'Production AI Compiler Fixer Architecture with ECR and ALB'
 
 Parameters:
   KeyPairName:
@@ -7,6 +101,37 @@ Parameters:
     Description: Name of an existing EC2 KeyPair to enable SSH access
 
 Resources:
+  # ==========================================
+  # CONTAINER REGISTRY STORAGE
+  # ==========================================
+  CompilerAppECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: ai-compiler-app
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only the last 5 images to optimize storage costs",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # ==========================================
+  # HIGH AVAILABILITY NETWORKING LAYER
+  # ==========================================
   CompilerFixerVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -17,12 +142,28 @@ Resources:
         - Key: Name
           Value: AI-Compiler-VPC
 
-  CompilerFixerSubnet:
+  # The ALB requires subnets in two separate physical Availability Zones
+  CompilerFixerSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref CompilerFixerVPC
       CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
       MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: AI-Compiler-Subnet-A
+
+  CompilerFixerSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CompilerFixerVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: AI-Compiler-Subnet-B
 
   CompilerFixerInternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -46,16 +187,36 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref CompilerFixerInternetGateway
 
-  SubnetRouteTableAssociation:
+  SubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref CompilerFixerSubnet
+      SubnetId: !Ref CompilerFixerSubnetA
       RouteTableId: !Ref CompilerFixerRouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref CompilerFixerSubnetB
+      RouteTableId: !Ref CompilerFixerRouteTable
+
+  # ==========================================
+  # FIREWALL SECURITY STRATEGY
+  # ==========================================
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow standard internet traffic into the public Load Balancer
+      VpcId: !Ref CompilerFixerVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
 
   CompilerFixerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH and Streamlit traffic
+      GroupDescription: Secure instance access controls
       VpcId: !Ref CompilerFixerVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -65,16 +226,54 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8501
           ToPort: 8501
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup # ONLY accepts app requests from the ALB!
 
+  # ==========================================
+  # APPLICATION LOAD BALANCER LAYER
+  # ==========================================
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: compiler-fixer-alb
+      Subnets:
+        - !Ref CompilerFixerSubnetA
+        - !Ref CompilerFixerSubnetB
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Type: application
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref CompilerFixerVPC
+      Port: 8501
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 4
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  # ==========================================
+  # CORE COMPUTE SERVER (EC2)
+  # ==========================================
   CompilerFixerInstance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.small
-      # This magical line automatically fetches the latest official Ubuntu 22.04 LTS image for whatever region you are running in!
       ImageId: '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id}}'
       KeyName: !Ref KeyPairName
-      SubnetId: !Ref CompilerFixerSubnet
+      SubnetId: !Ref CompilerFixerSubnetA
       SecurityGroupIds:
         - !Ref CompilerFixerSecurityGroup
       BlockDeviceMappings:
@@ -85,3 +284,12 @@ Resources:
       Tags:
         - Key: Name
           Value: AI-Compiler-Fixer-Server
+
+Outputs:
+  ECRRepositoryUri:
+    Description: URI target location for pushing Docker images
+    Value: !GetAtt CompilerAppECRRepository.RepositoryUri
+
+  LoadBalancerDNS:
+    Description: Public application access URL
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
