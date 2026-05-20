@@ -78,6 +78,15 @@
 
 
 
+
+
+
+
+
+
+
+
+
 name: CI/CD Docker Deploy to AWS EC2
 
 on:
@@ -179,16 +188,19 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           export AWS_DEFAULT_REGION="us-east-1"
           
-          # DYNAMIC FIX: Let the EC2 machine find out its own Account ID via the local AWS CLI 
+          # Let the EC2 machine find out its own Account ID via the local AWS CLI 
           export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 
+          # Write out a local .env file so Docker Compose can reference the account ID variable securely
+          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" > .env
+
           # Authenticate your local Docker engine into the private AWS ECR Registry path
-          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
           
           # Pull down images using the fresh environment variables and spin up your stack
-          sudo -E docker compose pull
-          sudo -E docker compose up -d
+          docker compose pull
+          docker compose up -d
 
           # Wait for the Ollama container port mappings to settle, then download model weights
           sleep 5
-          sudo docker compose exec -d ollama ollama run qwen2.5-coder:1.5bgit add .
+          docker compose exec -d ollama ollama run qwen2.5-coder:1.5b
