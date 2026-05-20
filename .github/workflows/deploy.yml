@@ -78,7 +78,6 @@
 
 
 
-
 name: CI/CD Docker Deploy to AWS EC2
 
 on:
@@ -146,6 +145,7 @@ jobs:
 
           # Install AWS CLI dependencies if missing
           if ! command -v aws &> /dev/null; then
+            sudo apt-get update -y
             sudo apt-get install -y unzip curl
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip -q awscliv2.zip
@@ -171,24 +171,24 @@ jobs:
         host: ${{ env.EC2_PUBLIC_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        # Pass variables from the secure GitHub Actions environment directly down to the runner script
-        envs: AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
         script: |
           cd /var/www/ai_compiler_fixer
           
-          # Explicitly export keys so the instance can securely speak to ECR
+          # Pass credentials down so the instance can invoke verification checks natively
           export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
           export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           export AWS_DEFAULT_REGION="us-east-1"
-          export AWS_ACCOUNT_ID="${{ secrets.AWS_ACCOUNT_ID }}"
-
-          # Authenticate Docker daemon cleanly using the newly installed CLI
-          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
-          # Pull and spin up services
+          # DYNAMIC FIX: Let the EC2 machine find out its own Account ID via the local AWS CLI 
+          export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+
+          # Authenticate your local Docker engine into the private AWS ECR Registry path
+          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
+          
+          # Pull down images using the fresh environment variables and spin up your stack
           sudo -E docker compose pull
           sudo -E docker compose up -d
 
-          # Allow a small 5-second window for Ollama socket synchronization before triggering weights download
+          # Wait for the Ollama container port mappings to settle, then download model weights
           sleep 5
-          sudo docker compose exec -d ollama ollama run qwen2.5-coder:1.5b
+          sudo docker compose exec -d ollama ollama run qwen2.5-coder:1.5bgit add .
