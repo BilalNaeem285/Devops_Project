@@ -1,0 +1,48 @@
+name: Clean Up and Destroy AWS Infrastructure
+
+on:
+  workflow_dispatch: # Allows manual safety trigger from the GitHub Actions tab
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Purge Private Amazon ECR Repository Images
+      run: |
+        # Change this if your ECR repository has a different name
+        REPOSITORY_NAME="ai-compiler-app"
+        
+        if aws ecr describe-repositories --repository-names "$REPOSITORY_NAME" > /dev/null 2>&1; then
+          echo "Repository found. Purging all stored container images..."
+          
+          # Get all image digests
+          IMAGE_IDS=$(aws ecr list-images --repository-name "$REPOSITORY_NAME" --query 'imageIds[*]' --output json)
+          
+          # Delete images if the repository is not empty
+          if [ "$IMAGE_IDS" != "[]" ] && [ ! -z "$IMAGE_IDS" ]; then
+            aws ecr batch-delete-image --repository-name "$REPOSITORY_NAME" --image-ids "$IMAGE_IDS"
+          fi
+          
+          echo "Deleting ECR Repository..."
+          aws ecr delete-repository --repository-name "$REPOSITORY_NAME" --force
+        else
+          echo "ECR Repository $REPOSITORY_NAME does not exist. Skipping."
+        fi
+
+    - name: Destroy AWS CloudFormation Infrastructure Stack
+      uses: aws-actions/aws-cloudformation-github-deploy@v1
+      with:
+        name: ai-compiler-fixer-docker-stack-v4
+        template: aws/template.yml
+        no-fail-on-empty-changeset: "1"
+        action: DELETE # This flag tells CloudFormation to completely erase everything
